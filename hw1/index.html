@@ -53,9 +53,24 @@
 		-->
 
       <h2>Overview</h2>
-      Give a high-level overview of what you implemented in this homework. Think
-      about what you've built as a whole. Share your thoughts on what
-      interesting things you've learned from completing the homework.
+      <p>
+        In this homework, I built a rasterizer pipeline from scratch. Starting
+        with basic triangle rasterization, I incrementally added supersampling
+        for antialiasing, barycentric interpolation for smooth color gradients,
+        and texture mapping with different pixel and level sampling techniques.
+        I also implemented geometric transforms using homogeneous coordinates
+        and used them to pose an articulated robot.
+      </p>
+      <p>
+        The most interesting part for me was actually the robot task. It was
+        really satisfying to see how chaining simple matrix transforms could
+        create complex articulated motion. It felt like building a little puppet
+        where each piece moves naturally. Beyond that, this homework helped me
+        understand how the math behind rendering (edge functions, barycentric
+        weights, texture derivatives) directly creates the visual effects we see
+        on screen, and gave me a better sense of the tradeoffs between quality,
+        speed, and memory.
+      </p>
 
       <h2>Task 1: Drawing Single-Color Triangles</h2>
       <p>
