@@ -250,26 +250,20 @@
 
       <h2>Part 4: Handling self-collisions</h2>
       <h3>Implementation</h3>
-      We implemented self-collision using spatial hashing to keep the cost
-      manageable. Three pieces. <code>hash_position</code> partitions space
-      into 3D boxes of size <code>(3 * width / num_width_points, 3 * height /
-      num_height_points, max(w, h))</code>, snaps a position to its box with
-      <code>fmod</code>, and combines the box coordinates into a single float
-      using prime multipliers (31, 97, 53). <code>build_spatial_map</code>
-      walks every point mass and appends a pointer to it into the bucket for
-      its hashed key, allocating a new <code>vector&lt;PointMass *&gt;</code>
-      lazily when a key is first seen. <code>self_collide</code> looks up
-      the bucket for the point mass's own position, iterates the candidates,
-      skips itself, and for each candidate within
-      <code>2 * thickness</code> distance accumulates a correction vector
-      that pushes the pair apart. The mean correction is divided by
-      <code>simulation_steps</code> and added to the point mass position.
-      Finally we hooked this into <code>simulate</code>: each timestep we
-      call <code>build_spatial_map</code> once and then
-      <code>self_collide</code> on every point mass between the Verlet
-      integration and the collision-object pass.
+      We implemented self-collision using spatial hashing.
+      <code>hash_position</code> partitions space into 3D boxes of size
+      (3 * width / num_width_points, 3 * height / num_height_points, max(w, h))
+      and combines the box coordinates into a single float using prime
+      multipliers. <code>build_spatial_map</code> clears the hash table and
+      inserts every point mass into its corresponding bucket.
+      <code>self_collide</code> looks up nearby candidates from the bucket,
+      skips itself, and pushes the point mass away from any candidate within
+      2 * thickness distance. The total correction is averaged and divided by
+      simulation_steps. We call <code>build_spatial_map</code> and
+      <code>self_collide</code> in <code>simulate</code> right after Verlet
+      integration.
 
-      <h3>Falling and folding sequence</h3>
+      <h3>Cloth falling and folding on itself</h3>
       <div
         style="
           display: flex;
@@ -280,24 +274,19 @@
       >
         <figure>
           <img src="images/part4/self_early.png" width="300px" />
-          <figcaption>Early — cloth mid-fall, first folds appearing</figcaption>
+          <figcaption>Early stage</figcaption>
         </figure>
         <figure>
           <img src="images/part4/self_mid.png" width="300px" />
-          <figcaption>Mid — cloth landing, layers visibly resting on each other</figcaption>
+          <figcaption>Mid stage</figcaption>
         </figure>
         <figure>
           <img src="images/part4/self_rest.png" width="300px" />
-          <figcaption>Rest — cloth flattened on plane with residual folds</figcaption>
+          <figcaption>Rest state</figcaption>
         </figure>
       </div>
-      <p>
-        With self-collision off the cloth would clip through itself and end up
-        as a flat sheet. With our spatial-hash repulsion the layers stack
-        correctly. The rest state still has minor residual motion since our
-        Verlet model has no damped spring force, which the spec explicitly
-        says is fine.
-      </p>
+      We can see the cloth start folding on itself as it falls and lands in
+      stacked layers without clipping through itself.
 
       <h3>Density variation</h3>
       <div
@@ -310,20 +299,16 @@
       >
         <figure>
           <img src="images/part4/self_density_1.png" width="350px" />
-          <figcaption>density = 1 (very light)</figcaption>
+          <figcaption>density = 1</figcaption>
         </figure>
         <figure>
           <img src="images/part4/self_density_500.png" width="350px" />
-          <figcaption>density = 500 (very heavy)</figcaption>
+          <figcaption>density = 500</figcaption>
         </figure>
       </div>
-      <p>
-        Lighter cloth (density = 1) drifts down slowly and the fabric retains
-        its shape mid-fall — gravity force is small relative to the spring
-        forces holding the cloth together. Heavier cloth (density = 500) drops
-        fast and creates pronounced compressed folds on impact because each
-        point mass carries more momentum into the collision.
-      </p>
+      Lower density makes the cloth lighter and slower to fall, with smaller
+      and softer folds. Higher density makes the cloth heavier and creates
+      larger, more compressed folds when it lands.
 
       <h3>ks variation</h3>
       <div
@@ -336,49 +321,35 @@
       >
         <figure>
           <img src="images/part4/self_ks_500.png" width="350px" />
-          <figcaption>ks = 500 (weak springs)</figcaption>
+          <figcaption>ks = 500</figcaption>
         </figure>
         <figure>
           <img src="images/part4/self_ks_50000.png" width="350px" />
-          <figcaption>ks = 50000 (very stiff springs)</figcaption>
+          <figcaption>ks = 50000</figcaption>
         </figure>
       </div>
-      <p>
-        Weak springs (ks = 500) let the cloth stretch and crumple into thicker
-        bundles when it lands. Stiff springs (ks = 50000) keep the cloth
-        nearly flat as it falls and the resting shape has shorter, sharper
-        wave patterns instead of soft compressed bunching.
-      </p>
+      Lower ks makes the springs weaker, so the cloth stretches more and
+      bunches up in thicker layers. Higher ks keeps the cloth stiff and
+      produces shallower, more rigid folds.
 
       <h2>Part 5: Shaders</h2>
-      <h3>What a shader program is</h3>
-      <p>
-        A shader program is a small program that runs on the GPU as part of
-        the rendering pipeline. We use two stages here. The vertex shader
-        runs once per vertex and is responsible for transforming positions
-        into screen space and writing out per-vertex values (world position,
-        normal, UV, tangent) that the rasterizer interpolates across the
-        triangle. The fragment shader then runs once per pixel-sized
-        fragment, taking those interpolated values as input and computing
-        the final color. Lighting and material effects come from doing math
-        in the fragment shader on the interpolated normal and position
-        relative to the camera and light positions, then optionally sampling
-        from textures or cubemaps.
-      </p>
+      <h3>Shader programs</h3>
+      A shader program is a small program that runs on the GPU during
+      rendering. The vertex shader runs once per vertex and outputs the
+      vertex position in screen space along with values like world position,
+      normal, and UV coordinates. The fragment shader runs once per fragment
+      and uses the interpolated values from the vertex shader to compute the
+      final pixel color. Together they let us implement different lighting
+      and material effects by changing how positions and colors are computed
+      on the GPU.
 
-      <h3>Blinn-Phong</h3>
-      <p>
-        Blinn-Phong combines three components into a single shading model.
-        Ambient is a constant color added to every fragment, modeling weak
-        bounced light filling shadows. Diffuse is Lambertian
-        <code>k_d * (I / r^2) * max(0, n . l)</code>, dimmer where the
-        surface faces away from the light. Specular is
-        <code>k_s * (I / r^2) * max(0, n . h)^p</code> using the halfway
-        vector <code>h = normalize(l + v)</code>, producing a tight
-        highlight that depends on the camera angle. We used
-        <code>k_a = 0.3</code>, <code>k_d = 1.0</code>, <code>k_s = 0.5</code>,
-        <code>p = 32</code>, and <code>I_a = 1.0</code>.
-      </p>
+      <h3>Blinn-Phong shading</h3>
+      The Blinn-Phong model combines three components: ambient, diffuse, and
+      specular. Ambient is a constant base color added to every fragment.
+      Diffuse depends on how much the surface normal faces the light.
+      Specular depends on the halfway vector between the light direction and
+      the view direction, raised to a shininess exponent. We used k_a = 0.3,
+      k_d = 1.0, k_s = 0.5, p = 32.
       <div
         style="
           display: flex;
@@ -405,31 +376,25 @@
         </figure>
       </div>
 
-      <h3>Texture mapping (custom texture)</h3>
+      <h3>Texture mapping</h3>
+      We replaced texture_1.png with a custom image and rendered with the
+      Texture shader, which samples the texture using the interpolated UV
+      coordinates of each fragment.
       <div style="display: flex; justify-content: center">
         <figure>
           <img src="images/part5/texture_custom.png" width="500px" />
-          <figcaption>Custom texture sampled in <code>Texture.frag</code> via
-            <code>texture(u_texture_1, v_uv)</code>. UV coordinates are
-            interpolated across the cloth quads, so the image deforms with
-            the drape.</figcaption>
+          <figcaption>Custom texture on the cloth</figcaption>
         </figure>
       </div>
 
       <h3>Bump and Displacement mapping</h3>
-      <p>
-        Bump mapping fakes surface detail by perturbing the normal in the
-        fragment shader using the gradient of a height map.
-        <code>dU = (h(u + 1/w, v) - h(u, v)) * k_h * k_n</code> and similarly
-        for <code>dV</code> in the vertical direction. The local-space normal
-        <code>(-dU, -dV, 1)</code> is rotated into world space by the TBN
-        matrix and then plugged into the same Blinn-Phong calculation we
-        wrote earlier. The geometry doesn't actually change — only the
-        normals do. Displacement mapping does the same shading, but in
-        addition the vertex shader pushes each vertex along its normal by
-        <code>h(u, v) * k_h</code>. Real geometry moves, so the silhouette
-        changes too. We used the brick texture (texture_4) for both.
-      </p>
+      Bump mapping perturbs the surface normal using the gradient of a
+      height map but leaves the geometry unchanged. Displacement mapping
+      does the same shading, but the vertex shader also pushes each vertex
+      along its normal by the height map value, so the actual geometry
+      changes. We used texture_4.png for both. The displacement render
+      shows more pronounced surface detail because the geometry actually
+      moves, while bump only fakes it through shading.
       <div
         style="
           display: flex;
@@ -440,31 +405,25 @@
       >
         <figure>
           <img src="images/part5/bump_cloth.png" width="320px" />
-          <figcaption>Bump mapping on cloth (pinned4)</figcaption>
+          <figcaption>Bump on cloth</figcaption>
         </figure>
         <figure>
           <img src="images/part5/bump_sphere.png" width="320px" />
-          <figcaption>Bump mapping on sphere</figcaption>
+          <figcaption>Bump on sphere</figcaption>
         </figure>
         <figure>
           <img src="images/part5/displacement_sphere.png" width="320px" />
-          <figcaption>Displacement mapping on sphere</figcaption>
+          <figcaption>Displacement on sphere</figcaption>
         </figure>
       </div>
 
       <h4>Sphere coarseness comparison</h4>
-      <p>
-        We rendered each shader at <code>-o 16 -a 16</code> (very coarse
-        sphere mesh) and <code>-o 128 -a 128</code> (fine mesh). For bump
-        mapping, the underlying sphere geometry is unchanged either way, so
-        the only effect of changing coarseness is on the cloth-sphere
-        contact surface and on the silhouette where the cloth wraps over
-        the sphere top. For displacement mapping, the actual vertices are
-        being pushed by the height map, so the coarse mesh produces a
-        chunkier, more pronounced relief because each displaced triangle
-        covers a larger area, while the fine mesh gives a smoother, more
-        continuous surface relief.
-      </p>
+      We rendered both shaders at -o 16 -a 16 and -o 128 -a 128. With the
+      coarse sphere, displacement creates chunkier surface detail since
+      each large triangle gets pushed by the same height value. The fine
+      sphere gives smoother and more detailed displacement. Bump mapping
+      looks similar across both because the geometry never changes, only
+      the shading.
       <div
         style="
           display: flex;
@@ -491,15 +450,11 @@
         </figure>
       </div>
 
-      <h3>Mirror (environment-mapped reflection)</h3>
-      <p>
-        For the mirror shader we compute the outgoing eye-ray
-        <code>wo = normalize(u_cam_pos - v_position)</code>, reflect it
-        across the surface normal with <code>wi = reflect(-wo, n)</code>,
-        and sample the environment cubemap in direction <code>wi</code>.
-        No shadow rays — the assumption is that the sky is infinitely far
-        and there's nothing in between.
-      </p>
+      <h3>Mirror</h3>
+      The mirror shader computes the eye ray from the camera to the
+      fragment, reflects it across the surface normal, and samples the
+      environment cubemap in that direction. The cloth and sphere look like
+      polished metal reflecting the surrounding sky.
       <div
         style="
           display: flex;
@@ -510,11 +465,11 @@
       >
         <figure>
           <img src="images/part5/mirror_cloth.png" width="350px" />
-          <figcaption>Mirror cloth</figcaption>
+          <figcaption>Mirror on cloth</figcaption>
         </figure>
         <figure>
           <img src="images/part5/mirror_sphere.png" width="350px" />
-          <figcaption>Mirror cloth over sphere</figcaption>
+          <figcaption>Mirror on cloth over sphere</figcaption>
         </figure>
       </div>
 
